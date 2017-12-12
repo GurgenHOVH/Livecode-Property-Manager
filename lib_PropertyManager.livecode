@@ -1,1 +1,169 @@
-script "lib_PropertyManager"local sPM_Properties -- All properties stored in this variable------------------------------------------------------- pmSetProp-- DESCRIPTION--         Stores the properties-- PARAMETERS--         pProp: The property name--         pVal: The property value--         pObj: Not required, send to specify whos the property is-- CHANGES--         10/31/16 : Gurgen - Created-----------------------------------------------------command pmSetProp pProp, pVal, pObj   if pObj is empty then      put pVal into sPM_Properties[the long id of me][pProp]   else      put pVal into sPM_Properties[pObj][pProp]   end ifend pmSetProp------------------------------------------------------- pmGetProp-- DESCRIPTION--           Returns the propery value-- PARAMETERS--         pProp: The property name--         pObj: Not required, send to specify whos the property is-- CHANGES--         10/31/16 : Gurgen - Created-----------------------------------------------------function pmGetProp pProp, pObj   if pObj is empty then      return sPM_Properties[the long id of me][pProp]   else      return sPM_Properties[pObj][pProp]   end ifend pmGetProp#### Short sintaxfunction $g pProp, pObj   return pmGetProp(pProp, pObj)end $gcommand $s pProp, pVal, pObj   pmSetProp pProp, pVal, pObjend $s------------------------------------------------------- pmGetAll-- DESCRIPTION--           Returns all properties as an array-- PARAMETERS--         pObj: Not required, send to specify whos properties needs to be returned-- CHANGES--         10/31/16 : Gurgen - Created-----------------------------------------------------function pmGetAll pObj   if pObj is empty then      return sPM_Properties[the long id of me]   else      return sPM_Properties[pObj]   end if end pmGetAll
+script "lib_PropertyManager"
+
+local sPM_Properties -- All properties stored in this variable
+
+
+
+-----------------------------------------------------
+-- pmSetProp
+-- DESCRIPTION
+--         Stores the properties
+-- PARAMETERS
+--         pProp: The property name
+--         pVal: The property value
+--         pObj: Not required, send to specify whos the property is
+-- CHANGES
+--         10/31/16 : Gurgen - Created
+-----------------------------------------------------
+command pmSetProp pProp, pVal, pObj
+   if pObj is empty then
+      put the long id of me into pObj
+   end if
+
+   put pVal into sPM_Properties[pObj][pProp]
+
+   _pmSendUpdates pProp, pVal, pObj
+end pmSetProp
+
+-----------------------------------------------------
+-- pmGetProp
+-- DESCRIPTION
+--           Returns the propery value
+-- PARAMETERS
+--         pProp: The property name
+--         pObj: Not required, send to specify whos the property is
+-- CHANGES
+--         10/31/16 : Gurgen - Created
+-----------------------------------------------------
+function pmGetProp pProp, pObj
+   if pObj is empty then
+      return sPM_Properties[the long id of me][pProp]
+   else
+      return sPM_Properties[pObj][pProp]
+   end if
+end pmGetProp
+
+#### Short sintax
+function $g pProp, pObj
+   return pmGetProp(pProp, pObj)
+end $g
+
+command $s pProp, pVal, pObj
+   pmSetProp pProp, pVal, pObj
+end $s
+-----------------------------------------------------
+-- pmGetAll
+-- DESCRIPTION
+--           Returns all properties as an array
+-- PARAMETERS
+--         pObj: Not required, send to specify whos properties needs to be returned
+-- CHANGES
+--         10/31/16 : Gurgen - Created
+-----------------------------------------------------
+function pmGetAll pObj
+   if pObj is empty then
+      return sPM_Properties[the long id of me]
+   else
+      return sPM_Properties[pObj]
+   end if
+end pmGetAll
+
+
+-----------------------------------------------------
+-- pmSubscribe
+-- DESCRIPTION
+--           Subscribes the caller object to the changes of given property
+-- PARAMETERS
+--         pProp: The property name
+--         pCallback: The callback massage to be sent
+--         pObj: Not required, send to specify whos properties needs to be subscribed to
+-- CHANGES
+--         12/11/17 : Gurgen - Created
+-----------------------------------------------------
+function pmSubscribe pProp, pCallback, pObj
+   put _pmGetCaller() into tCaller
+
+   if sPM_Properties["subscriptions"]["caller"][tCaller][pCallback]["callback"] = pCallback then
+      return sPM_Properties["subscriptions"]["caller"][tCaller][pCallback]["id"]
+   end if
+
+   if pObj = empty then
+      put the long id of me into pObj
+   end if
+
+   put UUID() into tSubscription
+   put pProp into sPM_Properties["subscriptions"]["prop"][tSubscription]
+   put pObj into sPM_Properties["subscriptions"]["obj"][tSubscription]
+
+   put tCaller into sPM_Properties["subscriptions"][pObj][pProp][tSubscription]["caller"]
+   put pCallback into sPM_Properties["subscriptions"][pObj][pProp][tSubscription]["callback"]
+   put tSubscription into sPM_Properties["subscriptions"][pObj][pProp][tSubscription]["id"]
+
+   put pCallback into sPM_Properties["subscriptions"]["caller"][tCaller][pCallback]["callback"]
+   put tSubscription into sPM_Properties["subscriptions"]["caller"][tCaller][pCallback]["id"]
+
+   return tSubscription
+end pmSubscribe
+
+
+-----------------------------------------------------
+-- pmUnsubscribe
+-- DESCRIPTION
+--           Unsubscribes the caller object from the changes of gives given property
+-- PARAMETERS
+--         pSubscriptionID: The subscription ID returned by pmSubscribe
+-- CHANGES
+--         12/11/17 : Gurgen - Created
+-----------------------------------------------------
+command pmUnsubscribe pSubscriptionID
+   put sPM_Properties["subscriptions"]["obj"][pSubscriptionID] into tObj
+   put sPM_Properties["subscriptions"]["prop"][pSubscriptionID] into tProp
+
+   put sPM_Properties["subscriptions"][tObj][tProp][pSubscriptionID]["caller"] into tCaller
+   put sPM_Properties["subscriptions"][tObj][tProp][pSubscriptionID]["callback"] into tCallback
+
+   delete var sPM_Properties["subscriptions"][tObj][tProp][pSubscriptionID]
+   delete var sPM_Properties["subscriptions"]["obj"][pSubscriptionID]
+   delete var sPM_Properties["subscriptions"]["prop"][pSubscriptionID]
+
+   delete var sPM_Properties["subscriptions"]["caller"][tCaller][tCallback]
+end pmUnsubscribe
+
+
+-----------------------------------------------------
+-- _pmSendUpdates
+-- DESCRIPTION
+--           Sends events to subscribed objects with new propert value
+-- PARAMETERS
+--         pProp: The property name
+--         pCallback: The callback massage to be sent
+--         pObj:
+-- CHANGES
+--         12/11/17 : Gurgen - Created
+-----------------------------------------------------
+private command _pmSendUpdates pProp, pVal, pObj
+   repeat for each element subscription in sPM_Properties["subscriptions"][pObj][pProp]
+      if not exists(subscription["caller"]) then
+         pmUnsubscribe subscription["id"]
+         next repeat
+      end if
+
+      dispatch subscription["callback"] to subscription["caller"] with pVal, subscription["id"]
+   end repeat
+end _pmSendUpdates
+
+-----------------------------------------------------------------------
+-- getCaller
+-- DESCRIPTION
+--           Returns  the caller object id
+-- PARAMETERS
+-- CHANGES
+-- 11/01/16: Gurgen created
+-----------------------------------------------------------------------
+private function _pmGetCaller
+   get item 1 to -3 of line -3 of the executionContexts
+   if there is not an it then
+      delete item -1 of it
+   end if
+   return it
+end _pmGetCaller
